@@ -1,13 +1,13 @@
 {
-  "name": "APPNAME",
+  "name": "zombie",
   "private": true,
   "packageManager": "pnpm@10.30.3",
   "engines": { "node": ">=22" },
   "pnpm": { "onlyBuiltDependencies": ["esbuild"] },
   "scripts": {
-    "dev": "pnpm --filter @APPNAME/web dev",
-    "build": "pnpm --filter @APPNAME/web build",
-    "preview": "pnpm --filter @APPNAME/web preview",
-    "typecheck": "pnpm --filter @APPNAME/web exec tsc -b"
+    "dev": "pnpm --filter @zombie/web dev",
+    "build": "pnpm --filter @zombie/web build",
+    "preview": "pnpm --filter @zombie/web preview",
+    "typecheck": "pnpm --filter @zombie/web exec tsc -b"
   }
 }
