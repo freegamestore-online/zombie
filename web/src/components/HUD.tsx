@@ -253,9 +253,9 @@ export function HUD({
           ))}
         </div>
 
-        {/* Active weapon info */}
+        {/* Active weapon info + upgrade button */}
         {activeWeapon && (
-          <div className="text-center pointer-events-none">
+          <div className="text-center">
             <div className="bg-black/70 border border-gray-700 rounded-lg px-3 py-1">
               <p className="text-white font-bold text-sm">{activeWeapon.icon} {activeWeapon.name}</p>
               {activeWeapon.id !== "fists" && (
@@ -264,7 +264,16 @@ export function HUD({
                 </p>
               )}
               {activeWeapon.upgradeLevel < 3 && activeWeapon.id !== "fists" && (
-                <p className="text-yellow-500 text-[10px]">[U] Upgrade ({upgradeCost} pts){canUpgrade ? "" : " ✗"}</p>
+                <button
+                  onClick={onUpgrade}
+                  className={`pointer-events-auto mt-1 text-[10px] px-2 py-0.5 rounded transition-all ${
+                    canUpgrade
+                      ? "bg-yellow-700 hover:bg-yellow-600 text-yellow-100"
+                      : "bg-gray-800 text-gray-500 cursor-not-allowed"
+                  }`}
+                >
+                  ⬆ Upgrade ({upgradeCost}pts)
+                </button>
               )}
             </div>
           </div>
