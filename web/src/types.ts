@@ -1,1 +1,2 @@
-export type GamePhase = "menu" | "playing" | "over";
+// re-export from lib for convenience
+export type { GamePhase } from "./lib/types";
