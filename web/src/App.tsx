@@ -1,10 +1,24 @@
+import "@babylonjs/core/Lights/Shadows/shadowGeneratorSceneComponent";
+import "@babylonjs/core/Collisions/collisionCoordinator";
+import "@babylonjs/core/Culling/ray";
+import { Color3 } from "@babylonjs/core/Maths/math.color";
+import { Color4 } from "@babylonjs/core/Maths/math.color";
+import { DirectionalLight } from "@babylonjs/core/Lights/directionalLight";
+import { Engine } from "@babylonjs/core/Engines/engine";
+import { FreeCamera } from "@babylonjs/core/Cameras/freeCamera";
+import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
+import { Mesh } from "@babylonjs/core/Meshes/mesh";
+import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
+import { Scene } from "@babylonjs/core/scene";
+import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
+import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { useRef, useEffect, useState, useCallback } from "react";
 import { Shell } from "./components/Shell";
 import { HUD } from "./components/HUD";
-import * as BABYLON from "@babylonjs/core";
 import type { GameState, Weapon } from "./lib/types";
 import { createInitialState, ALL_WEAPONS } from "./lib/types";
-import { initAudio, setMuted, isMuted, sfx } from "./lib/audio";
+import { useSound } from "@freegamestore/games";
+import { initAudio, setMuted, sfx } from "./lib/audio";
 import { useHighScore } from "./hooks/useHighScore";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -21,8 +35,8 @@ const SUPPLY_COUNT = 12;
 
 // ─── Runtime types ────────────────────────────────────────────────────────────
 interface ZombieEntity {
-  mesh: BABYLON.Mesh;
-  headMesh: BABYLON.Mesh;
+  mesh: Mesh;
+  headMesh: Mesh;
   health: number;
   speed: number;
   damage: number;
@@ -34,14 +48,14 @@ interface ZombieEntity {
 }
 
 interface SupplyCrate {
-  mesh: BABYLON.Mesh;
+  mesh: Mesh;
   type: "medkit" | "ammo" | "weapon" | "score";
   collected: boolean;
 }
 
 interface Projectile {
-  mesh: BABYLON.Mesh;
-  velocity: BABYLON.Vector3;
+  mesh: Mesh;
+  velocity: Vector3;
   damage: number;
   life: number;
   isExplosive: boolean;
@@ -62,12 +76,12 @@ interface GameLoop {
   pickupFlash: number;
   pickupFlashText: string;
   missionNotify: { text: string; timer: number };
-  playerCamera: BABYLON.FreeCamera | null;
-  scene: BABYLON.Scene | null;
-  engine: BABYLON.Engine | null;
-  buildings: BABYLON.Mesh[];
-  sunLight: BABYLON.DirectionalLight | null;
-  ambientLight: BABYLON.HemisphericLight | null;
+  playerCamera: FreeCamera | null;
+  scene: Scene | null;
+  engine: Engine | null;
+  buildings: Mesh[];
+  sunLight: DirectionalLight | null;
+  ambientLight: HemisphericLight | null;
   pointerLocked: boolean;
 }
 
@@ -77,7 +91,8 @@ export default function App() {
   const loopRef = useRef<GameLoop | null>(null);
   const [highScore, updateHighScore] = useHighScore("zombie_highscore");
   const [hudState, setHudState] = useState<GameState>(() => createInitialState(highScore));
-  const [muted, setMutedState] = useState(true);
+  // The platform mute toggle (SDK) owns the state; the audio engine follows it.
+  const { muted, toggle: toggleMuted } = useSound();
   const [showInventory, setShowInventory] = useState(false);
   const [hurtFlash, setHurtFlash] = useState(0);
   const [pickupFlash, setPickupFlash] = useState(0);
@@ -103,66 +118,66 @@ export default function App() {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
-    const scene = new BABYLON.Scene(engine);
-    scene.clearColor = new BABYLON.Color4(0.05, 0.08, 0.12, 1);
-    scene.gravity = new BABYLON.Vector3(0, -20, 0);
+    const engine = new Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
+    const scene = new Scene(engine);
+    scene.clearColor = new Color4(0.05, 0.08, 0.12, 1);
+    scene.gravity = new Vector3(0, -20, 0);
     scene.collisionsEnabled = true;
 
     // Camera
-    const camera = new BABYLON.FreeCamera("playerCam", new BABYLON.Vector3(0, 1.7, 0), scene);
-    camera.setTarget(new BABYLON.Vector3(0, 1.7, 1));
+    const camera = new FreeCamera("playerCam", new Vector3(0, 1.7, 0), scene);
+    camera.setTarget(new Vector3(0, 1.7, 1));
     camera.minZ = 0.1;
     camera.maxZ = 300;
     camera.checkCollisions = true;
     camera.applyGravity = true;
-    camera.ellipsoid = new BABYLON.Vector3(0.5, 0.9, 0.5);
+    camera.ellipsoid = new Vector3(0.5, 0.9, 0.5);
     camera.speed = 0;
 
     // Lighting
-    const ambient = new BABYLON.HemisphericLight("ambient", new BABYLON.Vector3(0, 1, 0), scene);
+    const ambient = new HemisphericLight("ambient", new Vector3(0, 1, 0), scene);
     ambient.intensity = 0.4;
-    ambient.diffuse = new BABYLON.Color3(0.6, 0.7, 1.0);
-    ambient.groundColor = new BABYLON.Color3(0.1, 0.1, 0.15);
+    ambient.diffuse = new Color3(0.6, 0.7, 1.0);
+    ambient.groundColor = new Color3(0.1, 0.1, 0.15);
 
-    const sun = new BABYLON.DirectionalLight("sun", new BABYLON.Vector3(-1, -2, -1).normalize(), scene);
+    const sun = new DirectionalLight("sun", new Vector3(-1, -2, -1).normalize(), scene);
     sun.intensity = 1.2;
-    sun.diffuse = new BABYLON.Color3(1.0, 0.9, 0.7);
+    sun.diffuse = new Color3(1.0, 0.9, 0.7);
 
     // Ground
-    const ground = BABYLON.MeshBuilder.CreateGround("ground", { width: CITY_SIZE * 2, height: CITY_SIZE * 2, subdivisions: 4 }, scene);
-    const groundMat = new BABYLON.StandardMaterial("groundMat", scene);
-    groundMat.diffuseColor = new BABYLON.Color3(0.18, 0.18, 0.22);
-    groundMat.specularColor = new BABYLON.Color3(0.05, 0.05, 0.05);
+    const ground = MeshBuilder.CreateGround("ground", { width: CITY_SIZE * 2, height: CITY_SIZE * 2, subdivisions: 4 }, scene);
+    const groundMat = new StandardMaterial("groundMat", scene);
+    groundMat.diffuseColor = new Color3(0.18, 0.18, 0.22);
+    groundMat.specularColor = new Color3(0.05, 0.05, 0.05);
     ground.material = groundMat;
     ground.checkCollisions = true;
 
     // Road grid
     for (let i = -3; i <= 3; i++) {
-      const roadH = BABYLON.MeshBuilder.CreateGround(`roadH_${i}`, { width: CITY_SIZE * 2, height: 4 }, scene);
+      const roadH = MeshBuilder.CreateGround(`roadH_${i}`, { width: CITY_SIZE * 2, height: 4 }, scene);
       roadH.position.z = i * 20;
       roadH.position.y = 0.01;
-      const roadMatH = new BABYLON.StandardMaterial(`roadMatH_${i}`, scene);
-      roadMatH.diffuseColor = new BABYLON.Color3(0.12, 0.12, 0.14);
+      const roadMatH = new StandardMaterial(`roadMatH_${i}`, scene);
+      roadMatH.diffuseColor = new Color3(0.12, 0.12, 0.14);
       roadH.material = roadMatH;
 
-      const roadV = BABYLON.MeshBuilder.CreateGround(`roadV_${i}`, { width: 4, height: CITY_SIZE * 2 }, scene);
+      const roadV = MeshBuilder.CreateGround(`roadV_${i}`, { width: 4, height: CITY_SIZE * 2 }, scene);
       roadV.position.x = i * 20;
       roadV.position.y = 0.011;
-      const roadMatV = new BABYLON.StandardMaterial(`roadMatV_${i}`, scene);
-      roadMatV.diffuseColor = new BABYLON.Color3(0.12, 0.12, 0.14);
+      const roadMatV = new StandardMaterial(`roadMatV_${i}`, scene);
+      roadMatV.diffuseColor = new Color3(0.12, 0.12, 0.14);
       roadV.material = roadMatV;
     }
 
     // Buildings
-    const buildings: BABYLON.Mesh[] = [];
-    const buildingPositions: BABYLON.Vector3[] = [];
+    const buildings: Mesh[] = [];
+    const buildingPositions: Vector3[] = [];
     const buildingColors = [
-      new BABYLON.Color3(0.35, 0.32, 0.28),
-      new BABYLON.Color3(0.28, 0.30, 0.35),
-      new BABYLON.Color3(0.25, 0.28, 0.32),
-      new BABYLON.Color3(0.32, 0.28, 0.25),
-      new BABYLON.Color3(0.22, 0.24, 0.28),
+      new Color3(0.35, 0.32, 0.28),
+      new Color3(0.28, 0.30, 0.35),
+      new Color3(0.25, 0.28, 0.32),
+      new Color3(0.32, 0.28, 0.25),
+      new Color3(0.22, 0.24, 0.28),
     ];
     const rng = (min: number, max: number) => min + Math.random() * (max - min);
 
@@ -182,67 +197,67 @@ export default function App() {
       const bd = rng(6, 14);
       const bh = rng(8, 30);
 
-      const building = BABYLON.MeshBuilder.CreateBox(`building_${i}`, { width: bw, depth: bd, height: bh }, scene);
+      const building = MeshBuilder.CreateBox(`building_${i}`, { width: bw, depth: bd, height: bh }, scene);
       building.position.set(bx, bh / 2, bz);
       building.checkCollisions = true;
-      const bMat = new BABYLON.StandardMaterial(`buildMat_${i}`, scene);
+      const bMat = new StandardMaterial(`buildMat_${i}`, scene);
       const colorIdx = Math.floor(Math.random() * buildingColors.length);
-      bMat.diffuseColor = buildingColors[colorIdx] ?? new BABYLON.Color3(0.3, 0.3, 0.35);
-      bMat.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
+      bMat.diffuseColor = buildingColors[colorIdx] ?? new Color3(0.3, 0.3, 0.35);
+      bMat.specularColor = new Color3(0.1, 0.1, 0.1);
       building.material = bMat;
 
       // Windows
       const windowRows = Math.floor(bh / 3);
       for (let wr = 0; wr < windowRows; wr++) {
-        const win = BABYLON.MeshBuilder.CreatePlane(`win_${i}_${wr}`, { width: 1.2, height: 0.8 }, scene);
+        const win = MeshBuilder.CreatePlane(`win_${i}_${wr}`, { width: 1.2, height: 0.8 }, scene);
         win.position.set(bx + bw / 2 + 0.01, bh / 2 - 3 + wr * 2.8, bz);
         win.rotation.y = Math.PI / 2;
-        const winMat = new BABYLON.StandardMaterial(`winMat_${i}_${wr}`, scene);
+        const winMat = new StandardMaterial(`winMat_${i}_${wr}`, scene);
         winMat.emissiveColor = Math.random() > 0.4
-          ? new BABYLON.Color3(0.8, 0.7, 0.3)
-          : new BABYLON.Color3(0.05, 0.05, 0.08);
+          ? new Color3(0.8, 0.7, 0.3)
+          : new Color3(0.05, 0.05, 0.08);
         win.material = winMat;
       }
 
       buildings.push(building);
-      buildingPositions.push(new BABYLON.Vector3(bx, 0, bz));
+      buildingPositions.push(new Vector3(bx, 0, bz));
     }
 
     // Street props
     for (let i = 0; i < 20; i++) {
       const cx = rng(-CITY_SIZE * 0.7, CITY_SIZE * 0.7);
       const cz = rng(-CITY_SIZE * 0.7, CITY_SIZE * 0.7);
-      const car = BABYLON.MeshBuilder.CreateBox(`car_${i}`, { width: 2, depth: 4, height: 1.2 }, scene);
+      const car = MeshBuilder.CreateBox(`car_${i}`, { width: 2, depth: 4, height: 1.2 }, scene);
       car.position.set(cx, 0.6, cz);
       car.rotation.y = rng(0, Math.PI * 2);
       car.checkCollisions = true;
-      const carMat = new BABYLON.StandardMaterial(`carMat_${i}`, scene);
-      carMat.diffuseColor = new BABYLON.Color3(rng(0.2, 0.6), rng(0.1, 0.4), rng(0.1, 0.4));
+      const carMat = new StandardMaterial(`carMat_${i}`, scene);
+      carMat.diffuseColor = new Color3(rng(0.2, 0.6), rng(0.1, 0.4), rng(0.1, 0.4));
       car.material = carMat;
     }
 
     // Fog
-    scene.fogMode = BABYLON.Scene.FOGMODE_EXP2;
+    scene.fogMode = Scene.FOGMODE_EXP2;
     scene.fogDensity = 0.012;
-    scene.fogColor = new BABYLON.Color3(0.05, 0.07, 0.1);
+    scene.fogColor = new Color3(0.05, 0.07, 0.1);
 
     // Supply crates
     const supplies: SupplyCrate[] = [];
     const crateTypes: Array<SupplyCrate["type"]> = ["medkit", "ammo", "weapon", "score"];
-    const crateColors: Record<SupplyCrate["type"], BABYLON.Color3> = {
-      medkit: new BABYLON.Color3(0.9, 0.2, 0.2),
-      ammo: new BABYLON.Color3(0.9, 0.7, 0.1),
-      weapon: new BABYLON.Color3(0.2, 0.5, 0.9),
-      score: new BABYLON.Color3(0.2, 0.9, 0.4),
+    const crateColors: Record<SupplyCrate["type"], Color3> = {
+      medkit: new Color3(0.9, 0.2, 0.2),
+      ammo: new Color3(0.9, 0.7, 0.1),
+      weapon: new Color3(0.2, 0.5, 0.9),
+      score: new Color3(0.2, 0.9, 0.4),
     };
 
     for (let i = 0; i < SUPPLY_COUNT; i++) {
       const sx = rng(-CITY_SIZE * 0.6, CITY_SIZE * 0.6);
       const sz = rng(-CITY_SIZE * 0.6, CITY_SIZE * 0.6);
-      const crate = BABYLON.MeshBuilder.CreateBox(`crate_${i}`, { size: 0.8 }, scene);
+      const crate = MeshBuilder.CreateBox(`crate_${i}`, { size: 0.8 }, scene);
       crate.position.set(sx, 0.4, sz);
       const ctype = crateTypes[i % crateTypes.length] ?? "score";
-      const crateMat = new BABYLON.StandardMaterial(`crateMat_${i}`, scene);
+      const crateMat = new StandardMaterial(`crateMat_${i}`, scene);
       crateMat.diffuseColor = crateColors[ctype];
       crateMat.emissiveColor = crateColors[ctype].scale(0.3);
       crate.material = crateMat;
@@ -439,10 +454,13 @@ export default function App() {
 
   const handleToggleMuted = useCallback(() => {
     initAudio();
-    const next = !isMuted();
-    setMuted(next);
-    setMutedState(next);
-  }, []);
+    toggleMuted();
+  }, [toggleMuted]);
+
+  useEffect(() => {
+    initAudio();
+    setMuted(muted);
+  }, [muted]);
 
   const handleUseMedkit = useCallback(() => {
     const lp = loopRef.current;
@@ -513,7 +531,7 @@ export default function App() {
 function respawnPlayer(lp: GameLoop) {
   if (!lp.playerCamera) return;
   lp.playerCamera.position.set(0, 1.7, 0);
-  lp.playerCamera.setTarget(new BABYLON.Vector3(0, 1.7, 5));
+  lp.playerCamera.setTarget(new Vector3(0, 1.7, 5));
   lp.mouseDX = 0;
   lp.mouseDY = 0;
 }
@@ -540,7 +558,7 @@ function resetSupplies(lp: GameLoop) {
   if (scav) scav.progress = 0;
 }
 
-function spawnWave(lp: GameLoop, scene: BABYLON.Scene) {
+function spawnWave(lp: GameLoop, scene: Scene) {
   const wave = lp.state.wave;
   const count = 5 + wave * 3;
 
@@ -560,25 +578,25 @@ function spawnWave(lp: GameLoop, scene: BABYLON.Scene) {
   }
 }
 
-function spawnZombie(lp: GameLoop, scene: BABYLON.Scene, x: number, z: number, type: ZombieEntity["type"]) {
-  const cfgMap: Record<ZombieEntity["type"], { h: number; r: number; hp: number; speed: number; dmg: number; color: BABYLON.Color3 }> = {
-    walker: { h: 1.8, r: 0.3, hp: 60,  speed: 2.5, dmg: 10, color: new BABYLON.Color3(0.3, 0.5, 0.2) },
-    runner: { h: 1.6, r: 0.25, hp: 40, speed: 5.5, dmg: 8,  color: new BABYLON.Color3(0.5, 0.3, 0.2) },
-    brute:  { h: 2.2, r: 0.5, hp: 200, speed: 1.8, dmg: 25, color: new BABYLON.Color3(0.4, 0.2, 0.2) },
-    spitter:{ h: 1.7, r: 0.3, hp: 50,  speed: 2.0, dmg: 12, color: new BABYLON.Color3(0.2, 0.4, 0.2) },
+function spawnZombie(lp: GameLoop, scene: Scene, x: number, z: number, type: ZombieEntity["type"]) {
+  const cfgMap: Record<ZombieEntity["type"], { h: number; r: number; hp: number; speed: number; dmg: number; color: Color3 }> = {
+    walker: { h: 1.8, r: 0.3, hp: 60,  speed: 2.5, dmg: 10, color: new Color3(0.3, 0.5, 0.2) },
+    runner: { h: 1.6, r: 0.25, hp: 40, speed: 5.5, dmg: 8,  color: new Color3(0.5, 0.3, 0.2) },
+    brute:  { h: 2.2, r: 0.5, hp: 200, speed: 1.8, dmg: 25, color: new Color3(0.4, 0.2, 0.2) },
+    spitter:{ h: 1.7, r: 0.3, hp: 50,  speed: 2.0, dmg: 12, color: new Color3(0.2, 0.4, 0.2) },
   };
   const cfg = cfgMap[type];
 
-  const body = BABYLON.MeshBuilder.CreateCapsule(`z_${Date.now()}_${Math.random()}`, { height: cfg.h, radius: cfg.r }, scene);
+  const body = MeshBuilder.CreateCapsule(`z_${Date.now()}_${Math.random()}`, { height: cfg.h, radius: cfg.r }, scene);
   body.position.set(x, cfg.h / 2, z);
-  const mat = new BABYLON.StandardMaterial(`zm_${Math.random()}`, scene);
+  const mat = new StandardMaterial(`zm_${Math.random()}`, scene);
   mat.diffuseColor = cfg.color;
   body.material = mat;
 
-  const head = BABYLON.MeshBuilder.CreateSphere(`zh_${Math.random()}`, { diameter: 0.4 }, scene);
+  const head = MeshBuilder.CreateSphere(`zh_${Math.random()}`, { diameter: 0.4 }, scene);
   head.position.set(x, cfg.h + 0.1, z);
-  const headMat = new BABYLON.StandardMaterial(`zhm_${Math.random()}`, scene);
-  headMat.diffuseColor = new BABYLON.Color3(0.6, 0.5, 0.4);
+  const headMat = new StandardMaterial(`zhm_${Math.random()}`, scene);
+  headMat.diffuseColor = new Color3(0.6, 0.5, 0.4);
   head.material = headMat;
 
   lp.zombies.push({
@@ -595,7 +613,7 @@ function spawnZombie(lp: GameLoop, scene: BABYLON.Scene, x: number, z: number, t
   });
 }
 
-function fireWeapon(lp: GameLoop, scene: BABYLON.Scene) {
+function fireWeapon(lp: GameLoop, scene: Scene) {
   const now = performance.now() / 1000;
   const weapon = lp.state.weapons[lp.state.activeWeaponIdx];
   if (!weapon) return;
@@ -618,10 +636,10 @@ function fireWeapon(lp: GameLoop, scene: BABYLON.Scene) {
     const fwdRay = cam.getForwardRay(weapon.range);
     for (const z of lp.zombies) {
       if (z.isDead) continue;
-      const dist = BABYLON.Vector3.Distance(z.mesh.position, cam.position);
+      const dist = Vector3.Distance(z.mesh.position, cam.position);
       if (dist < weapon.range + 1) {
         const dir = z.mesh.position.subtract(cam.position).normalize();
-        if (BABYLON.Vector3.Dot(fwdRay.direction, dir) > 0.6) {
+        if (Vector3.Dot(fwdRay.direction, dir) > 0.6) {
           damageZombie(lp, z, damage, scene);
         }
       }
@@ -634,18 +652,18 @@ function fireWeapon(lp: GameLoop, scene: BABYLON.Scene) {
   const pellets = weapon.id === "shotgun" ? 6 : 1;
 
   for (let i = 0; i < pellets; i++) {
-    const dir = forward.add(new BABYLON.Vector3(
+    const dir = forward.add(new Vector3(
       (Math.random() - 0.5) * spread,
       (Math.random() - 0.5) * spread,
       (Math.random() - 0.5) * spread,
     )).normalize();
 
-    const bullet = BABYLON.MeshBuilder.CreateSphere(`b_${Date.now()}_${i}`, { diameter: 0.12 }, scene);
+    const bullet = MeshBuilder.CreateSphere(`b_${Date.now()}_${i}`, { diameter: 0.12 }, scene);
     bullet.position.copyFrom(cam.position).addInPlace(forward.scale(0.8));
-    const bMat = new BABYLON.StandardMaterial(`bm_${Math.random()}`, scene);
+    const bMat = new StandardMaterial(`bm_${Math.random()}`, scene);
     bMat.emissiveColor = weapon.id === "molotov"
-      ? new BABYLON.Color3(1, 0.4, 0)
-      : new BABYLON.Color3(1, 0.9, 0.3);
+      ? new Color3(1, 0.4, 0)
+      : new Color3(1, 0.9, 0.3);
     bullet.material = bMat;
 
     lp.projectiles.push({
@@ -663,7 +681,7 @@ function fireWeapon(lp: GameLoop, scene: BABYLON.Scene) {
   else sfx.shoot();
 }
 
-function damageZombie(lp: GameLoop, z: ZombieEntity, damage: number, scene: BABYLON.Scene) {
+function damageZombie(lp: GameLoop, z: ZombieEntity, damage: number, scene: Scene) {
   z.health -= damage;
   if (z.health <= 0 && !z.isDead) {
     z.isDead = true;
@@ -671,16 +689,16 @@ function damageZombie(lp: GameLoop, z: ZombieEntity, damage: number, scene: BABY
     lp.state.kills++;
     lp.state.zombiesKilled++;
     lp.state.score += z.type === "brute" ? 50 : z.type === "runner" ? 30 : z.type === "spitter" ? 35 : 20;
-    const mat = z.mesh.material as BABYLON.StandardMaterial;
-    if (mat) mat.diffuseColor = new BABYLON.Color3(0.15, 0.05, 0.05);
+    const mat = z.mesh.material as StandardMaterial;
+    if (mat) mat.diffuseColor = new Color3(0.15, 0.05, 0.05);
     sfx.zombieDie();
 
     // Blood splat
-    const splat = BABYLON.MeshBuilder.CreateDisc(`splat_${Math.random()}`, { radius: 0.6, tessellation: 8 }, scene);
+    const splat = MeshBuilder.CreateDisc(`splat_${Math.random()}`, { radius: 0.6, tessellation: 8 }, scene);
     splat.position.set(z.mesh.position.x, 0.02, z.mesh.position.z);
     splat.rotation.x = Math.PI / 2;
-    const splatMat = new BABYLON.StandardMaterial(`sm_${Math.random()}`, scene);
-    splatMat.diffuseColor = new BABYLON.Color3(0.4, 0.0, 0.0);
+    const splatMat = new StandardMaterial(`sm_${Math.random()}`, scene);
+    splatMat.diffuseColor = new Color3(0.4, 0.0, 0.0);
     splat.material = splatMat;
     setTimeout(() => { if (!splat.isDisposed()) splat.dispose(); }, 15000);
 
@@ -801,24 +819,24 @@ function grantRandomWeapon(lp: GameLoop) {
   lp.pickupFlashText = `${template.icon} Found ${template.name}!`;
 }
 
-function explode(lp: GameLoop, pos: BABYLON.Vector3, damage: number, scene: BABYLON.Scene) {
+function explode(lp: GameLoop, pos: Vector3, damage: number, scene: Scene) {
   const radius = 5;
   for (const z of lp.zombies) {
     if (z.isDead) continue;
-    const dist = BABYLON.Vector3.Distance(pos, z.mesh.position);
+    const dist = Vector3.Distance(pos, z.mesh.position);
     if (dist < radius) damageZombie(lp, z, damage * (1 - dist / radius), scene);
   }
-  const flash = BABYLON.MeshBuilder.CreateSphere(`expl_${Math.random()}`, { diameter: radius * 2 }, scene);
+  const flash = MeshBuilder.CreateSphere(`expl_${Math.random()}`, { diameter: radius * 2 }, scene);
   flash.position.copyFrom(pos);
-  const fMat = new BABYLON.StandardMaterial(`fm_${Math.random()}`, scene);
-  fMat.emissiveColor = new BABYLON.Color3(1, 0.5, 0);
+  const fMat = new StandardMaterial(`fm_${Math.random()}`, scene);
+  fMat.emissiveColor = new Color3(1, 0.5, 0);
   fMat.alpha = 0.6;
   flash.material = fMat;
   setTimeout(() => { if (!flash.isDisposed()) flash.dispose(); }, 300);
 }
 
 // ─── Main update ──────────────────────────────────────────────────────────────
-function updateGame(lp: GameLoop, dt: number, scene: BABYLON.Scene) {
+function updateGame(lp: GameLoop, dt: number, scene: Scene) {
   const state = lp.state;
   const cam = lp.playerCamera;
   if (!cam) return;
@@ -842,11 +860,11 @@ function updateGame(lp: GameLoop, dt: number, scene: BABYLON.Scene) {
   }
 
   const fwd = cam.getForwardRay(1).direction.clone();
-  const right = BABYLON.Vector3.Cross(fwd, BABYLON.Vector3.Up()).normalize();
+  const right = Vector3.Cross(fwd, Vector3.Up()).normalize();
   fwd.y = 0;
   fwd.normalize();
 
-  const moveDir = new BABYLON.Vector3(0, 0, 0);
+  const moveDir = new Vector3(0, 0, 0);
   if (lp.keys["KeyW"] === true || lp.keys["ArrowUp"] === true || lp.keys["TouchForward"] === true) moveDir.addInPlace(fwd);
   if (lp.keys["KeyS"] === true || lp.keys["ArrowDown"] === true || lp.keys["TouchBack"] === true) moveDir.subtractInPlace(fwd);
   if (lp.keys["KeyA"] === true || lp.keys["ArrowLeft"] === true || lp.keys["TouchLeft"] === true) moveDir.subtractInPlace(right);
@@ -921,7 +939,7 @@ function updateGame(lp: GameLoop, dt: number, scene: BABYLON.Scene) {
       dir.normalize();
       z.mesh.position.addInPlace(dir.scale(z.speed * dt * state.difficulty));
       z.headMesh.position.set(z.mesh.position.x, z.mesh.position.y + 1.1, z.mesh.position.z);
-      z.mesh.lookAt(new BABYLON.Vector3(playerPos.x, z.mesh.position.y, playerPos.z));
+      z.mesh.lookAt(new Vector3(playerPos.x, z.mesh.position.y, playerPos.z));
     }
 
     if (dist < 1.5) {
@@ -951,10 +969,10 @@ function updateGame(lp: GameLoop, dt: number, scene: BABYLON.Scene) {
       z.attackCooldown -= dt;
       if (z.attackCooldown <= 0) {
         z.attackCooldown = 3;
-        const aBullet = BABYLON.MeshBuilder.CreateSphere(`acid_${Math.random()}`, { diameter: 0.2 }, scene);
-        aBullet.position.copyFrom(z.mesh.position).addInPlace(new BABYLON.Vector3(0, 1.2, 0));
-        const aMat = new BABYLON.StandardMaterial(`am_${Math.random()}`, scene);
-        aMat.emissiveColor = new BABYLON.Color3(0.2, 1, 0.2);
+        const aBullet = MeshBuilder.CreateSphere(`acid_${Math.random()}`, { diameter: 0.2 }, scene);
+        aBullet.position.copyFrom(z.mesh.position).addInPlace(new Vector3(0, 1.2, 0));
+        const aMat = new StandardMaterial(`am_${Math.random()}`, scene);
+        aMat.emissiveColor = new Color3(0.2, 1, 0.2);
         aBullet.material = aMat;
         const aimDir = playerPos.subtract(aBullet.position).normalize();
         lp.projectiles.push({
@@ -991,14 +1009,14 @@ function updateGame(lp: GameLoop, dt: number, scene: BABYLON.Scene) {
     if (p.damage > 0) {
       for (const z of lp.zombies) {
         if (z.isDead) continue;
-        if (BABYLON.Vector3.Distance(p.mesh.position, z.mesh.position) < 0.8) {
+        if (Vector3.Distance(p.mesh.position, z.mesh.position) < 0.8) {
           damageZombie(lp, z, p.damage, scene);
           if (!p.isExplosive) projToRemove.push(p);
           break;
         }
       }
     } else {
-      if (BABYLON.Vector3.Distance(p.mesh.position, playerPos) < 0.6) {
+      if (Vector3.Distance(p.mesh.position, playerPos) < 0.6) {
         state.health -= Math.abs(p.damage) * state.difficulty;
         lp.hurtFlash = 0.8;
         sfx.playerHurt();
@@ -1022,7 +1040,7 @@ function updateGame(lp: GameLoop, dt: number, scene: BABYLON.Scene) {
   // Supply crate collection + bob animation
   for (const s of lp.supplies) {
     if (s.collected) continue;
-    if (BABYLON.Vector3.Distance(s.mesh.position, playerPos) < 1.5) {
+    if (Vector3.Distance(s.mesh.position, playerPos) < 1.5) {
       collectCrate(lp, s);
       continue;
     }
@@ -1045,37 +1063,37 @@ function updateDayNight(lp: GameLoop, t: number) {
   if (t < 0.15) {
     const p = t / 0.15;
     sun.intensity = 0.3 + p * 0.9;
-    sun.diffuse = new BABYLON.Color3(1.0, 0.6 + p * 0.3, 0.3 + p * 0.4);
+    sun.diffuse = new Color3(1.0, 0.6 + p * 0.3, 0.3 + p * 0.4);
     amb.intensity = 0.2 + p * 0.3;
-    scene.fogColor = new BABYLON.Color3(0.3 + p * 0.2, 0.2 + p * 0.2, 0.15 + p * 0.1);
-    scene.clearColor = new BABYLON.Color4(0.3 + p * 0.3, 0.2 + p * 0.3, 0.15 + p * 0.25, 1);
+    scene.fogColor = new Color3(0.3 + p * 0.2, 0.2 + p * 0.2, 0.15 + p * 0.1);
+    scene.clearColor = new Color4(0.3 + p * 0.3, 0.2 + p * 0.3, 0.15 + p * 0.25, 1);
     scene.fogDensity = 0.012;
   } else if (t < 0.45) {
     sun.intensity = 1.2;
-    sun.diffuse = new BABYLON.Color3(1.0, 0.95, 0.85);
+    sun.diffuse = new Color3(1.0, 0.95, 0.85);
     amb.intensity = 0.5;
-    scene.fogColor = new BABYLON.Color3(0.5, 0.55, 0.65);
-    scene.clearColor = new BABYLON.Color4(0.4, 0.55, 0.75, 1);
+    scene.fogColor = new Color3(0.5, 0.55, 0.65);
+    scene.clearColor = new Color4(0.4, 0.55, 0.75, 1);
     scene.fogDensity = 0.012;
   } else if (t < 0.55) {
     const p = (t - 0.45) / 0.1;
     sun.intensity = 1.2 - p * 0.9;
-    sun.diffuse = new BABYLON.Color3(1.0, 0.5 - p * 0.2, 0.1);
+    sun.diffuse = new Color3(1.0, 0.5 - p * 0.2, 0.1);
     amb.intensity = 0.5 - p * 0.3;
-    scene.fogColor = new BABYLON.Color3(0.5 - p * 0.4, 0.3 - p * 0.2, 0.2 - p * 0.15);
-    scene.clearColor = new BABYLON.Color4(0.4 - p * 0.35, 0.3 - p * 0.25, 0.2 - p * 0.18, 1);
+    scene.fogColor = new Color3(0.5 - p * 0.4, 0.3 - p * 0.2, 0.2 - p * 0.15);
+    scene.clearColor = new Color4(0.4 - p * 0.35, 0.3 - p * 0.25, 0.2 - p * 0.18, 1);
     scene.fogDensity = 0.012 + p * 0.006;
   } else {
     sun.intensity = 0.05;
-    sun.diffuse = new BABYLON.Color3(0.3, 0.35, 0.5);
+    sun.diffuse = new Color3(0.3, 0.35, 0.5);
     amb.intensity = 0.12;
-    scene.fogColor = new BABYLON.Color3(0.04, 0.05, 0.08);
-    scene.clearColor = new BABYLON.Color4(0.02, 0.03, 0.06, 1);
+    scene.fogColor = new Color3(0.04, 0.05, 0.08);
+    scene.clearColor = new Color4(0.02, 0.03, 0.06, 1);
     scene.fogDensity = 0.018;
   }
 
   const angle = t * Math.PI * 2;
-  sun.direction = new BABYLON.Vector3(
+  sun.direction = new Vector3(
     Math.cos(angle),
     -Math.abs(Math.sin(angle)) - 0.3,
     Math.sin(angle * 0.5),
